@@ -1,0 +1,666 @@
+# .github/workflows/ci-cd.yml
+# Complete CI/CD Pipeline for StreamForge Platform
+
+name: StreamForge CI/CD Pipeline
+
+on:
+  # Trigger on push to main branches
+  push:
+    branches: [ main, master, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '**.txt'
+  
+  # Trigger on pull requests to main
+  pull_request:
+    branches: [ main, master ]
+    types: [ opened, synchronize, reopened ]
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      skip_tests:
+        description: 'Skip tests?'
+        required: false
+        default: false
+        type: boolean
+
+# Environment variables
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY_BACKEND: streamforge-backend
+  ECR_REPOSITORY_FRONTEND: streamforge-frontend
+  EKS_CLUSTER_DEV: streamforge-dev-cluster
+  EKS_CLUSTER_STAGING: streamforge-staging-cluster
+  EKS_CLUSTER_PROD: streamforge-prod-cluster
+  K8S_NAMESPACE: streamforge
+  HELM_RELEASE_NAME: streamforge
+
+# Concurrency control - cancel in-progress runs for same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # JOB 1: Security Scan
+  security-scan:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner (FS)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          hide-progress: false
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Trivy in repo mode (config scanning)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+  # JOB 2: Lint and Format Check
+  lint:
+    name: 🔍 Lint Code
+    runs-on: ubuntu-latest
+    needs: security-scan
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+        
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Run ESLint (Backend)
+        working-directory: ./backend
+        run: npm run lint || true
+      
+      - name: Run ESLint (Frontend)
+        working-directory: ./frontend
+        run: npm run lint || true
+      
+      - name: Check formatting (Prettier)
+        run: npx prettier --check "**/*.{js,jsx,ts,tsx,json,yml,yaml}"
+
+  # JOB 3: Unit Tests
+  test:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    if: github.event.inputs.skip_tests != 'true'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Run Backend Tests with Coverage
+        working-directory: ./backend
+        run: npm test -- --coverage --watchAll=false
+        env:
+          NODE_ENV: test
+          CI: true
+      
+      - name: Upload Backend Coverage
+        uses: codecov/codecov-action@v4
+        with:
+          directory: ./backend/coverage
+          flags: backend
+          name: backend-coverage
+      
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Run Frontend Tests
+        working-directory: ./frontend
+        run: npm test -- --watchAll=false --passWithNoTests
+        env:
+          CI: true
+
+  # JOB 4: SonarQube Analysis
+  sonarqube:
+    name: 📊 SonarQube Analysis
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=streamforge
+            -Dsonar.organization=prajwalkhandare
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/node_modules/**,**/*.test.js,**/coverage/**
+            -Dsonar.tests=.
+            -Dsonar.test.inclusions=**/*.test.js,**/*.test.ts
+            -Dsonar.typescript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.qualitygate.wait=true
+      
+      - name: SonarQube Quality Gate Check
+        id: sonarqube-quality-gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        with:
+          scanMetadataReportFile: .scannerwork/report-task.txt
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # JOB 5: Docker Build and Push
+  build-and-push:
+    name: 🐳 Build & Push Images
+    runs-on: ubuntu-latest
+    needs: sonarqube
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      image_tag: ${{ steps.vars.outputs.sha_short }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set variables
+        id: vars
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      
+      # Build and push backend
+      - name: Build, tag, and push backend image to Amazon ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ steps.vars.outputs.sha_short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ steps.vars.outputs.branch }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new
+          platforms: linux/amd64
+          build-args: |
+            NODE_ENV=production
+      
+      # Build and push frontend
+      - name: Build, tag, and push frontend image to Amazon ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ steps.vars.outputs.sha_short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ steps.vars.outputs.branch }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new
+          platforms: linux/amd64
+          build-args: |
+            REACT_APP_API_URL=/api
+            REACT_APP_AWS_REGION=${{ env.AWS_REGION }}
+      
+      # Temp fix for cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+      
+      # Scan images with Trivy again (defense in depth)
+      - name: Run Trivy on built backend image
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ steps.vars.outputs.sha_short }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+      
+      - name: Run Trivy on built frontend image
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ steps.vars.outputs.sha_short }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+  # JOB 6: Update Kubernetes Manifests
+  update-manifests:
+    name: 📝 Update K8s Manifests
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event.inputs.environment == 'prod'
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update Helm values with new image tag
+        run: |
+          cd k8s/helm/streamforge
+          # Update backend image tag
+          sed -i "s|tag: .*|tag: ${{ needs.build-and-push.outputs.image_tag }}|g" values.yaml
+          # Update frontend image tag (if separate)
+          sed -i "s|frontendTag: .*|frontendTag: ${{ needs.build-and-push.outputs.image_tag }}|g" values.yaml || true
+          
+          # Show changes
+          git diff
+      
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add k8s/helm/streamforge/values.yaml
+          git commit -m "chore: update image tag to ${{ needs.build-and-push.outputs.image_tag }} [skip ci]" || echo "No changes to commit"
+          git push
+
+  # JOB 7: Deploy to Dev Environment
+  deploy-dev:
+    name: 🚀 Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: [build-and-push, update-manifests]
+    if: github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'dev'
+    environment:
+      name: dev
+      url: http://dev.streamforge.com
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_DEV }}
+      
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.14.0'
+      
+      - name: Deploy with Helm
+        run: |
+          cd k8s/helm/streamforge
+          helm upgrade --install ${{ env.HELM_RELEASE_NAME }}-dev . \
+            --namespace ${{ env.K8S_NAMESPACE }}-dev \
+            --create-namespace \
+            --values values.yaml \
+            --values values-dev.yaml \
+            --set backend.image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --set frontend.image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --wait \
+            --timeout 10m \
+            --atomic
+      
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n ${{ env.K8S_NAMESPACE }}-dev
+          kubectl get svc -n ${{ env.K8S_NAMESPACE }}-dev
+          kubectl get ingress -n ${{ env.K8S_NAMESPACE }}-dev
+      
+      - name: Run smoke tests
+        run: |
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=streamforge -n ${{ env.K8S_NAMESPACE }}-dev --timeout=60s
+          
+          # Get service endpoint
+          ENDPOINT=$(kubectl get svc -n ${{ env.K8S_NAMESPACE }}-dev -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}')
+          
+          # Test health endpoint
+          curl -f http://$ENDPOINT/health || true
+
+  # JOB 8: Deploy to Staging (with approval)
+  deploy-staging:
+    name: 🚀 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy-dev]
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    environment:
+      name: staging
+      url: http://staging.streamforge.com
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_STAGING }}
+      
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      
+      - name: Deploy with Helm
+        run: |
+          cd k8s/helm/streamforge
+          helm upgrade --install ${{ env.HELM_RELEASE_NAME }}-staging . \
+            --namespace ${{ env.K8S_NAMESPACE }}-staging \
+            --create-namespace \
+            --values values.yaml \
+            --values values-staging.yaml \
+            --set backend.image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --set frontend.image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --wait \
+            --timeout 10m \
+            --atomic
+      
+      - name: Run integration tests
+        run: |
+          cd tests
+          npm ci
+          npm run test:integration -- --baseUrl=http://staging.streamforge.com
+
+  # JOB 9: Deploy to Production (manual approval required)
+  deploy-prod:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy-staging]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.environment == 'prod')
+    environment:
+      name: production
+      url: https://app.streamforge.com
+    
+    # Manual approval required in GitHub UI
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_PROD }}
+      
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      
+      - name: Deploy with Helm (Blue-Green)
+        run: |
+          cd k8s/helm/streamforge
+          
+          # Deploy blue version
+          helm upgrade --install ${{ env.HELM_RELEASE_NAME }}-blue . \
+            --namespace ${{ env.K8S_NAMESPACE }}-prod \
+            --create-namespace \
+            --values values.yaml \
+            --values values-prod.yaml \
+            --set backend.image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --set frontend.image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --set deployment.color=blue \
+            --wait \
+            --timeout 15m \
+            --atomic
+          
+          # Run smoke tests on blue
+          kubectl port-forward -n ${{ env.K8S_NAMESPACE }}-prod svc/streamforge-blue 8080:80 &
+          sleep 5
+          curl -f http://localhost:8080/health
+          
+          # Switch traffic to blue (if using service mesh or ingress)
+          kubectl patch service streamforge -n ${{ env.K8S_NAMESPACE }}-prod -p '{"spec":{"selector":{"color":"blue"}}}'
+          
+          # Delete green (old version)
+          helm uninstall ${{ env.HELM_RELEASE_NAME }}-green -n ${{ env.K8S_NAMESPACE }}-prod || true
+      
+      - name: Run post-deployment tests
+        run: |
+          curl -f https://app.streamforge.com/health
+          curl -f https://app.streamforge.com/api/health
+
+  # JOB 10: Performance Tests (k6)
+  performance-test:
+    name: ⚡ Performance Test
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run k6 load test
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: tests/performance/load-test.js
+          flags: --vus 10 --duration 30s
+        env:
+          BASE_URL: http://staging.streamforge.com
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-results
+          path: tests/performance/results.json
+
+  # JOB 11: Security Scan (DAST)
+  dast-scan:
+    name: 🌐 DAST Security Scan
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: OWASP ZAP Scan
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: 'http://staging.streamforge.com'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a'
+
+  # JOB 12: Infrastructure Compliance Scan
+  compliance-scan:
+    name: ✅ Compliance Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Checkov on Terraform
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform/
+          framework: terraform
+          output_format: cli
+          soft_fail: false
+      
+      - name: Run Kube-bench (CIS benchmark)
+        run: |
+          docker run --rm -v `pwd`:/host aquasec/kube-bench:latest run --targets node --version 1.15
+
+  # JOB 13: Send Notification
+  notify:
+    name: 📧 Send Notification
+    runs-on: ubuntu-latest
+    needs: [deploy-dev, deploy-staging, deploy-prod]
+    if: always()
+    
+    steps:
+      - name: Slack Notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: always()
+      
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "StreamForge CI/CD Pipeline Failed"
+          to: team@streamforge.com
+          from: GitHub Actions
+          body: "Pipeline ${{ github.workflow }} failed for ${{ github.repository }}. Check ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+  # JOB 14: Create GitHub Release
+  release:
+    name: 🏷️ Create Release
+    runs-on: ubuntu-latest
+    needs: [deploy-prod, performance-test]
+    if: github.ref == 'refs/heads/main' && success()
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Generate changelog
+        id: changelog
+        uses: metcalfc/changelog-generator@v4.3.1
+        with:
+          myToken: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # JOB 15: Update ArgoCD (if using)
+  update-argocd:
+    name: 🔄 Sync ArgoCD
+    runs-on: ubuntu-latest
+    needs: [deploy-prod]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/
+      
+      - name: Login to ArgoCD
+        run: |
+          argocd login ${{ secrets.ARGOCD_SERVER }} \
+            --username ${{ secrets.ARGOCD_USERNAME }} \
+            --password ${{ secrets.ARGOCD_PASSWORD }} \
+            --insecure
+      
+      - name: Sync application
+        run: |
+          argocd app sync streamforge-prod \
+            --grpc-web \
+            --timeout 300 \
+            --prune
+          
+          argocd app wait streamforge-prod \
+            --grpc-web \
+            --timeout 300 \
+            --health
+            

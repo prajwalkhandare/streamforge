@@ -1,0 +1,38 @@
+# Elasticsearch Configuration for StreamForge
+# Location: monitoring/elk/elasticsearch.yml
+
+cluster.name: "streamforge-elasticsearch"
+node.name: "elasticsearch-node-1"
+network.host: 0.0.0.0
+discovery.type: single-node
+
+# Paths
+path.data: /usr/share/elasticsearch/data
+path.logs: /usr/share/elasticsearch/logs
+
+# Memory
+bootstrap.memory_lock: true
+
+# HTTP
+http.port: 9200
+http.cors.enabled: true
+http.cors.allow-origin: "*"
+
+# Security (disable for development)
+xpack.security.enabled: false
+xpack.security.enrollment.enabled: false
+
+# Monitoring
+xpack.monitoring.collection.enabled: true
+
+# Index settings
+indices.query.bool.max_clause_count: 4096
+action.auto_create_index: true
+
+# Logging
+logger.org.elasticsearch: INFO
+
+# Disk watermark settings
+cluster.routing.allocation.disk.watermark.low: 85%
+cluster.routing.allocation.disk.watermark.high: 90%
+cluster.routing.allocation.disk.watermark.flood_stage: 95%

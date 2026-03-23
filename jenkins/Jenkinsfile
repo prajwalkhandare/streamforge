@@ -1,0 +1,263 @@
+pipeline {
+    agent any
+    
+    environment {
+        AWS_DEFAULT_REGION = 'ap-south-1'
+        ECR_REGISTRY = '123456789012.dkr.ecr.ap-south-1.amazonaws.com'
+        ECR_REPOSITORY = 'streamforge-backend'
+        EKS_CLUSTER_NAME = 'streamforge-dev-cluster'
+        SONAR_HOST_URL = 'http://sonarqube:9000'
+        SONAR_PROJECT_KEY = 'streamforge'
+        SLACK_CHANNEL = '#deployments'
+    }
+    
+    parameters {
+        choice(
+            name: 'DEPLOY_ENV',
+            choices: ['dev', 'staging', 'prod'],
+            description: 'Select deployment environment'
+        )
+        booleanParam(
+            name: 'RUN_SECURITY_SCAN',
+            defaultValue: true,
+            description: 'Run security scans?'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip unit tests?'
+        )
+    }
+    
+    tools {
+        nodejs 'NodeJS-20'
+    }
+    
+    stages {
+        stage('Init') {
+            steps {
+                script {
+                    currentBuild.displayName = "#${BUILD_NUMBER} - ${params.DEPLOY_ENV}"
+                }
+                echo "🚀 Starting deployment to ${params.DEPLOY_ENV}"
+                checkout scm
+            }
+        }
+        
+        stage('Install Dependencies') {
+            parallel {
+                stage('Backend Dependencies') {
+                    steps {
+                        dir('backend') {
+                            sh 'npm ci --cache .npm --prefer-offline'
+                        }
+                    }
+                }
+                stage('Frontend Dependencies') {
+                    steps {
+                        dir('frontend') {
+                            sh 'npm ci --cache .npm --prefer-offline'
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Unit Tests') {
+            when {
+                expression { !params.SKIP_TESTS }
+            }
+            parallel {
+                stage('Backend Tests') {
+                    steps {
+                        dir('backend') {
+                            sh 'npm test -- --coverage --watchAll=false'
+                            junit 'reports/junit/*.xml'
+                        }
+                    }
+                }
+                stage('Frontend Tests') {
+                    steps {
+                        dir('frontend') {
+                            sh 'npm test -- --coverage --watchAll=false'
+                            junit 'reports/junit/*.xml'
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            when {
+                expression { params.RUN_SECURITY_SCAN }
+            }
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        sonar-scanner \
+                          -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                          -Dsonar.sources=. \
+                          -Dsonar.host.url=${SONAR_HOST_URL} \
+                          -Dsonar.coverage.exclusions=**/*.test.js \
+                          -Dsonar.typescript.lcov.reportPaths=coverage/lcov.info
+                    '''
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            when {
+                expression { params.RUN_SECURITY_SCAN }
+            }
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+        
+        stage('Docker Build') {
+            parallel {
+                stage('Build Backend Image') {
+                    steps {
+                        dir('backend') {
+                            script {
+                                docker.build("${ECR_REGISTRY}/${ECR_REPOSITORY}:${BUILD_NUMBER}")
+                                docker.build("${ECR_REGISTRY}/${ECR_REPOSITORY}:latest")
+                            }
+                        }
+                    }
+                }
+                stage('Build Frontend Image') {
+                    steps {
+                        dir('frontend') {
+                            script {
+                                docker.build("${ECR_REGISTRY}/streamforge-frontend:${BUILD_NUMBER}")
+                                docker.build("${ECR_REGISTRY}/streamforge-frontend:latest")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Trivy Security Scan') {
+            when {
+                expression { params.RUN_SECURITY_SCAN }
+            }
+            parallel {
+                stage('Scan Backend Image') {
+                    steps {
+                        sh """
+                            trivy image \
+                              --severity HIGH,CRITICAL \
+                              --ignore-unfixed \
+                              --exit-code 1 \
+                              --format table \
+                              ${ECR_REGISTRY}/${ECR_REPOSITORY}:${BUILD_NUMBER}
+                        """
+                    }
+                }
+                stage('Scan Frontend Image') {
+                    steps {
+                        sh """
+                            trivy image \
+                              --severity HIGH,CRITICAL \
+                              --ignore-unfixed \
+                              --exit-code 1 \
+                              --format table \
+                              ${ECR_REGISTRY}/streamforge-frontend:${BUILD_NUMBER}
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Push to ECR') {
+            steps {
+                script {
+                    // Login to ECR
+                    sh 'aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}'
+                    
+                    // Push images
+                    sh "docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${BUILD_NUMBER}"
+                    sh "docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+                    sh "docker push ${ECR_REGISTRY}/streamforge-frontend:${BUILD_NUMBER}"
+                    sh "docker push ${ECR_REGISTRY}/streamforge-frontend:latest"
+                }
+            }
+        }
+        
+        stage('Update Helm Values') {
+            steps {
+                dir('k8s/helm/streamforge') {
+                    sh """
+                        sed -i 's/tag: .*/tag: ${BUILD_NUMBER}/' values.yaml
+                        git add values.yaml
+                        git commit -m "chore: update image tag to ${BUILD_NUMBER} [skip ci]"
+                        git push origin HEAD:${BRANCH_NAME}
+                    """
+                }
+            }
+        }
+        
+        stage('ArgoCD Sync') {
+            steps {
+                script {
+                    // Wait for ArgoCD to detect changes
+                    sleep(10)
+                    
+                    sh """
+                        argocd app sync streamforge-${params.DEPLOY_ENV} \
+                          --grpc-web \
+                          --timeout 300 \
+                          --prune
+                        
+                        argocd app wait streamforge-${params.DEPLOY_ENV} \
+                          --grpc-web \
+                          --timeout 300 \
+                          --health
+                    """
+                }
+            }
+        }
+        
+        stage('Smoke Tests') {
+            steps {
+                dir('tests') {
+                    sh """
+                        npm ci
+                        npm run smoke-tests -- --url=${module.alb.dns_name}
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            script {
+                slackSend(
+                    color: 'good',
+                    message: "✅ *${env.JOB_NAME}* - Build #${env.BUILD_NUMBER} succeeded\n" +
+                              "Environment: ${params.DEPLOY_ENV}\n" +
+                              "Deployed to: ${module.alb.dns_name}\n" +
+                              "<${env.BUILD_URL}|View Build>"
+                )
+            }
+        }
+        failure {
+            script {
+                slackSend(
+                    color: 'danger',
+                    message: "❌ *${env.JOB_NAME}* - Build #${env.BUILD_NUMBER} failed\n" +
+                              "Stage: ${env.STAGE_NAME}\n" +
+                              "<${env.BUILD_URL}|View Build>"
+                )
+            }
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

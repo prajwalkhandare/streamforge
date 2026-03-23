@@ -1,0 +1,69 @@
+# k8s/helm/streamforge/templates/NOTES.txt
+
+🎬 STREAMFORGE - Netflix-like OTT Platform
+============================================
+
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named: {{ .Release.Name }}
+Application version: {{ .Chart.AppVersion }}
+Deployed in namespace: {{ .Release.Namespace }}
+
+📊 STATUS
+---------
+Backend replicas: {{ .Values.backend.replicaCount }}
+Frontend replicas: {{ .Values.frontend.replicaCount }}
+PostgreSQL enabled: {{ .Values.postgresql.enabled }}
+Redis enabled: {{ .Values.redis.enabled }}
+
+🌐 ACCESS THE APPLICATION
+-------------------------
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}
+{{- end }}
+{{- else }}
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Values.frontend.name }} 8080:80
+  Then open http://localhost:8080
+{{- end }}
+
+🔧 USEFUL COMMANDS
+------------------
+# Get pods status
+kubectl get pods -n {{ .Release.Namespace }} -w
+
+# Check logs
+kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=backend
+kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=frontend
+
+# Scale backend
+kubectl scale -n {{ .Release.Namespace }} deployment/{{ .Values.backend.name }} --replicas=5
+
+# Port forward to database
+kubectl port-forward -n {{ .Release.Namespace }} svc/postgresql 5432:5432
+
+📈 MONITORING
+-------------
+{{- if .Values.monitoring.enabled }}
+Grafana: kubectl port-forward -n monitoring svc/grafana 3000:80
+Prometheus: kubectl port-forward -n monitoring svc/prometheus-server 9090:80
+{{- end }}
+
+🔐 SECURITY NOTES
+-----------------
+- Network policies are {{ if .Values.networkPolicies.enabled }}ENABLED{{ else }}DISABLED{{ end }}
+- Pod security context: Non-root user, read-only root filesystem
+- Secrets are stored in AWS Secrets Manager (not in git)
+
+💰 COST OPTIMIZATION
+-------------------
+- HPA enabled for auto-scaling
+- Resource requests/limits configured
+- Spot instances recommended for worker nodes
+
+📚 DOCUMENTATION
+----------------
+GitHub: https://github.com/prajwalkhandare/streamforge
+Architecture: See /docs folder
+
+Thank you for using StreamForge! 🚀

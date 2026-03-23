@@ -1,0 +1,303 @@
+# k8s/helm/streamforge/values.yaml
+
+# Global settings
+global:
+  environment: dev
+  region: ap-south-1
+  project: streamforge
+
+# Image settings
+image:
+  repository: prajwalkhandare/streamforge
+  tag: latest
+  pullPolicy: Always
+
+# Backend configuration
+backend:
+  enabled: true
+  name: streamforge-backend
+  replicaCount: 3
+  
+  image:
+    repository: prajwalkhandare/streamforge-backend
+    tag: latest
+    pullPolicy: Always
+  
+  containerPort: 5000
+  
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  
+  service:
+    type: ClusterIP
+    port: 5000
+    targetPort: 5000
+  
+  env:
+    - name: NODE_ENV
+      value: "production"
+    - name: PORT
+      value: "5000"
+    - name: DB_HOST
+      valueFrom:
+        secretKeyRef:
+          name: streamforge-secrets
+          key: db_host
+    - name: DB_PORT
+      value: "5432"
+    - name: DB_NAME
+      valueFrom:
+        secretKeyRef:
+          name: streamforge-secrets
+          key: db_name
+    - name: DB_USER
+      valueFrom:
+        secretKeyRef:
+          name: streamforge-secrets
+          key: db_user
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: streamforge-secrets
+          key: db_password
+    - name: REDIS_HOST
+      valueFrom:
+        secretKeyRef:
+          name: streamforge-secrets
+          key: redis_host
+    - name: REDIS_PORT
+      value: "6379"
+    - name: AWS_REGION
+      value: "ap-south-1"
+    - name: S3_VIDEOS_BUCKET
+      valueFrom:
+        configMapKeyRef:
+          name: streamforge-config
+          key: s3_videos_bucket
+    - name: CLOUDFRONT_DOMAIN
+      valueFrom:
+        configMapKeyRef:
+          name: streamforge-config
+          key: cloudfront_domain
+  
+  probes:
+    liveness:
+      path: /health
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      path: /health
+      initialDelaySeconds: 5
+      periodSeconds: 5
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Frontend configuration
+frontend:
+  enabled: true
+  name: streamforge-frontend
+  replicaCount: 2
+  
+  image:
+    repository: prajwalkhandare/streamforge-frontend
+    tag: latest
+    pullPolicy: Always
+  
+  containerPort: 80
+  
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+  
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+  
+  env:
+    - name: REACT_APP_API_URL
+      value: "/api"
+    - name: REACT_APP_AWS_REGION
+      value: "ap-south-1"
+    - name: REACT_APP_USER_POOL_ID
+      valueFrom:
+        configMapKeyRef:
+          name: streamforge-config
+          key: cognito_user_pool_id
+    - name: REACT_APP_USER_POOL_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: streamforge-secrets
+          key: cognito_client_id
+  
+  probes:
+    liveness:
+      path: /
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      path: /
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+  
+  hosts:
+    - host: streamforge.dev
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: streamforge-frontend
+              port:
+                number: 80
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: streamforge-backend
+              port:
+                number: 5000
+  
+  tls:
+    - hosts:
+        - streamforge.dev
+      secretName: streamforge-tls
+
+# PostgreSQL subchart configuration
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: ""
+    username: streamforge
+    password: ""
+    database: streamforge
+  primary:
+    persistence:
+      enabled: true
+      size: 100Gi
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "250m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+
+# Redis subchart configuration
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    password: ""
+  master:
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "200m"
+  replica:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "200m"
+
+# Monitoring
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Service accounts
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Container security context
+containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Network policies
+networkPolicies:
+  enabled: true
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retentionDays: 30
+
+  

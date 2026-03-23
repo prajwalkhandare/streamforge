@@ -1,0 +1,46 @@
+# k8s/helm/streamforge/values-prod.yaml
+
+global:
+  environment: prod
+
+backend:
+  replicaCount: 5
+  autoscaling:
+    minReplicas: 5
+    maxReplicas: 20
+  
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+frontend:
+  replicaCount: 3
+  autoscaling:
+    minReplicas: 3
+    maxReplicas: 10
+
+ingress:
+  hosts:
+    - host: app.streamforge.com
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: streamforge-frontend
+              port: 80
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: streamforge-backend
+              port: 5000
+  tls:
+    - hosts:
+        - app.streamforge.com
+      secretName: streamforge-tls-prod
+      

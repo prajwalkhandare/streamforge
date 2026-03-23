@@ -1,0 +1,25 @@
+# k8s/helm/streamforge/values-staging.yaml
+
+global:
+  environment: staging
+
+backend:
+  replicaCount: 3
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+frontend:
+  replicaCount: 2
+
+ingress:
+  hosts:
+    - host: staging.streamforge.com
+      paths:
+        - path: /
+          pathType: Prefix
+          

@@ -1,0 +1,70 @@
+┌─────────────────────────────────────────────────────────┐
+│                    STREAMFORGE OTT PLATFORM              │
+│              Netflix-like Architecture on AWS            │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│    ☁️ AWS CLOUD (Mumbai Region ap-south-1)              │
+│                                                          │
+│    🌐 CDN Layer                                          │
+│    ╔═══════════════════════════════════════════════╗    │
+│    ║  CloudFront Distribution  ←→  S3 Static      ║    │
+│    ║  (Global Edge Locations)      Hosting        ║    │
+│    ╚═══════════════════════════════════════════════╝    │
+│                        ↓                                 │
+│    🚦 Load Balancing Layer                               │
+│    ╔═══════════════════════════════════════════════╗    │
+│    ║  Application Load Balancer + WAF             ║    │
+│    ║  (SSL/TLS, Rate Limiting, DDoS Protection)   ║    │
+│    ╚═══════════════════════════════════════════════╝    │
+│                        ↓                                 │
+│    🐳 Container Orchestration Layer                      │
+│    ╔═══════════════════════════════════════════════╗    │
+│    ║           EKS Cluster (3 Nodes)              ║    │
+│    ║  ┌──────────┐ ┌──────────┐ ┌──────────┐    ║    │
+│    ║  │ Pod 1    │ │ Pod 2    │ │ Pod 3    │    ║    │
+│    ║  │ Backend  │ │ Backend  │ │ Backend  │    ║    │
+│    ║  │ API      │ │ API      │ │ API      │    ║    │
+│    ║  └──────────┘ └──────────┘ └──────────┘    ║    │
+│    ║  ┌──────────┐ ┌──────────┐ ┌──────────┐    ║    │
+│    ║  │ Pod 4    │ │ Pod 5    │ │ Pod 6    │    ║    │
+│    ║  │ Frontend │ │ Frontend │ │ Frontend │    ║    │
+│    ║  └──────────┘ └──────────┘ └──────────┘    ║    │
+│    ║       ↓ HPA Auto-scaling based on CPU       ║    │
+│    ╚═══════════════════════════════════════════════╝    │
+│                        ↓                                 │
+│    💾 Data Layer                                         │
+│    ╔═══════════════════════════════════════════════╗    │
+│    ║  ┌────────────┐    ┌────────────┐           ║    │
+│    ║  │ RDS        │    │ ElastiCache│           ║    │
+│    ║  │ PostgreSQL │    │ Redis 7.x │           ║    │
+│    ║  │ Multi-AZ   │    │ Cluster   │           ║    │
+│    ║  │ Encrypted  │    │ Caching   │           ║    │
+│    ║  └────────────┘    └────────────┘           ║    │
+│    ║  ┌────────────────────────────────────┐     ║    │
+│    ║  │ S3 Buckets                         │     ║    │
+│    ║  │ ├─ Video Storage (Versioned)       │     ║    │
+│    ║  │ └─ Thumbnails (Lifecycle Policies) │     ║    │
+│    ║  └────────────────────────────────────┘     ║    │
+│    ╚═══════════════════════════════════════════════╝    │
+│                                                          │
+│    🔧 CI/CD Pipeline                                     │
+│    ╔═══════════════════════════════════════════════╗    │
+│    ║  GitHub → Jenkins → SonarQube → Trivy        ║    │
+│    ║         → ECR → ArgoCD → EKS (Blue-Green)    ║    │
+│    ╚═══════════════════════════════════════════════╝    │
+│                                                          │
+│    📊 Observability                                      │
+│    ╔═══════════════════════════════════════════════╗    │
+│    ║  Prometheus → Grafana ← CloudWatch           ║    │
+│    ║  Logs → Elasticsearch → Kibana (ELK)         ║    │
+│    ║  Alerts → Slack/PagerDuty (MTTR < 15min)     ║    │
+│    ╚═══════════════════════════════════════════════╝    │
+│                                                          │
+│    🔐 Security Layer                                     │
+│    ╔═══════════════════════════════════════════════╗    │
+│    ║  IAM · KMS · Secrets Manager · Vault         ║    │
+│    ║  OPA/Kyverno · CIS Benchmarks · WAF          ║    │
+│    ║  Cognito Auth · JWT · RBAC                   ║    │
+│    ╚═══════════════════════════════════════════════╝    │
+│                                                          │
+└─────────────────────────────────────────────────────────┘

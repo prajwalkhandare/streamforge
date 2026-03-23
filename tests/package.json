@@ -1,0 +1,27 @@
+{
+  "name": "streamforge-tests",
+  "version": "1.0.0",
+  "description": "Test suite for StreamForge platform",
+  "scripts": {
+    "test:unit": "jest",
+    "test:integration": "jest --testMatch='**/integration/**/*.js'",
+    "test:smoke": "k6 run smoke/health-check.js",
+    "test:load": "k6 run performance/load-test.js",
+    "test:stress": "k6 run performance/stress-test.js",
+    "test:soak": "k6 run performance/soak-test.js",
+    "test:spike": "k6 run performance/spike-test.js",
+    "test:all": "npm run test:unit && npm run test:integration",
+    "perf:all": "k6 run performance/load-test.js && k6 run performance/stress-test.js"
+  },
+  "dependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4",
+    "k6": "^0.0.0"
+  },
+  "devDependencies": {
+    "@types/k6": "^0.49.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

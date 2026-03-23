@@ -1,0 +1,158 @@
+# k8s/manifests/configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streamforge-config
+  namespace: streamforge-dev
+  labels:
+    project: streamforge
+    environment: dev
+data:
+  # Application settings
+  NODE_ENV: "development"
+  LOG_LEVEL: "debug"
+  API_VERSION: "v1"
+  
+  # AWS resources
+  AWS_REGION: "ap-south-1"
+  S3_VIDEOS_BUCKET: "streamforge-dev-videos-123456789012"
+  S3_THUMBNAILS_BUCKET: "streamforge-dev-thumbnails-123456789012"
+  CLOUDFRONT_DOMAIN: "d1234567890abc.cloudfront.net"
+  
+  # Cognito
+  COGNITO_USER_POOL_ID: "ap-south-1_xxxxxxxxx"
+  COGNITO_REGION: "ap-south-1"
+  
+  # Feature flags
+  FEATURE_NEW_PLAYER: "true"
+  FEATURE_RECOMMENDATIONS: "true"
+  FEATURE_USER_PROFILES: "false"
+  
+  # Rate limiting
+  RATE_LIMIT_WINDOW: "900000"  # 15 minutes in ms
+  RATE_LIMIT_MAX: "100"
+  
+  # CORS
+  CORS_ORIGIN: "*"
+  
+  # Cache settings
+  CACHE_TTL_VIDEOS: "3600"
+  CACHE_TTL_USER: "300"
+  
+  # Video settings
+  MAX_VIDEO_SIZE: "104857600"  # 100MB in bytes
+  SUPPORTED_VIDEO_FORMATS: "mp4,mkv,avi,mov"
+  VIDEO_QUALITIES: "360p,480p,720p,1080p"
+  
+  # Database connection pool
+  DB_POOL_MIN: "2"
+  DB_POOL_MAX: "10"
+  DB_IDLE_TIMEOUT: "10000"
+  DB_CONNECTION_TIMEOUT: "30000"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streamforge-config
+  namespace: streamforge-staging
+  labels:
+    project: streamforge
+    environment: staging
+data:
+  NODE_ENV: "staging"
+  LOG_LEVEL: "info"
+  AWS_REGION: "ap-south-1"
+  S3_VIDEOS_BUCKET: "streamforge-staging-videos-123456789012"
+  CLOUDFRONT_DOMAIN: "d1234567890abc.cloudfront.net"
+  COGNITO_USER_POOL_ID: "ap-south-1_yyyyyyyyy"
+  RATE_LIMIT_WINDOW: "600000"
+  RATE_LIMIT_MAX: "200"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streamforge-config
+  namespace: streamforge-prod
+  labels:
+    project: streamforge
+    environment: production
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "warn"
+  AWS_REGION: "ap-south-1"
+  S3_VIDEOS_BUCKET: "streamforge-prod-videos-123456789012"
+  CLOUDFRONT_DOMAIN: "d1234567890abc.cloudfront.net"
+  COGNITO_USER_POOL_ID: "ap-south-1_zzzzzzzzz"
+  RATE_LIMIT_WINDOW: "300000"
+  RATE_LIMIT_MAX: "500"
+---
+# Nginx config for frontend
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: streamforge-dev
+data:
+  nginx.conf: |
+    server {
+        listen 80;
+        server_name localhost;
+        
+        root /usr/share/nginx/html;
+        index index.html;
+        
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+        
+        location /api {
+            proxy_pass http://streamforge-backend:5000;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+        
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+        }
+    }
+---
+# Prometheus config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: streamforge-monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      
+    scrape_configs:
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+            

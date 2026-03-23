@@ -1,0 +1,99 @@
+# Trivy Security Scan Configuration
+# Location: security/trivy/trivy-severity.yaml
+# Purpose: Define severity levels and exit codes for CI/CD
+
+# Scan configuration
+scan:
+  # Scan types to run
+  scanners:
+    - vuln        # Vulnerability scanning
+    - misconfig   # Misconfiguration scanning
+    - secret      # Secret scanning
+    - license     # License scanning
+  
+  # Skip files/directories
+  skip-dirs:
+    - "**/node_modules"
+    - "**/vendor"
+    - "**/.git"
+    - "**/dist"
+    - "**/build"
+  
+  skip-files:
+    - "**/*.test.js"
+    - "**/*.spec.js"
+    - "**/*_test.go"
+
+# Severity levels
+severity:
+  # Only report these severity levels
+  levels:
+    - CRITICAL
+    - HIGH
+    - MEDIUM
+    - LOW
+  
+  # Exit with error if any of these are found
+  exit-on:
+    - CRITICAL
+    - HIGH
+  
+  # Ignore unfixed vulnerabilities in these CVEs (temporary)
+  ignore-unfixed: false
+
+# Misconfiguration scanning
+misconfiguration:
+  # Include paths to scan
+  include:
+    - "**/*.tf"
+    - "**/*.yml"
+    - "**/*.yaml"
+    - "**/Dockerfile"
+    - "**/Jenkinsfile"
+  
+  # Ignore checks (if needed)
+  # ignore-checks:
+  #   - "AVD-AWS-0001"
+
+# Secret scanning
+secret:
+  # Exit if secrets found
+  exit-on-found: true
+  
+  # Custom secret patterns
+  custom-patterns:
+    - pattern: "AWS_SECRET_ACCESS_KEY\\s*=\\s*['\"]?[A-Za-z0-9/+=]{40}['\"]?"
+      description: "AWS Secret Access Key"
+    - pattern: "JWT_SECRET\\s*=\\s*['\"]?[A-Za-z0-9]{32,}['\"]?"
+      description: "JWT Secret"
+    - pattern: "password\\s*=\\s*['\"][^'\"]+['\"]"
+      description: "Hardcoded password"
+
+# License scanning
+license:
+  # License types to allow
+  allowed:
+    - MIT
+    - Apache-2.0
+    - BSD-2-Clause
+    - BSD-3-Clause
+    - ISC
+    - LGPL-2.1
+    - GPL-2.0
+  
+  # License types to block
+  blocked:
+    - GPL-3.0
+    - AGPL-3.0
+
+# Output formats
+output:
+  format: table  # table, json, sarif, html
+  # sarif-file: trivy-results.sarif
+
+# Docker image specific
+docker:
+  # Skip database update (use cached)
+  skip-update: false
+  # Database cache directory
+  cache-dir: /tmp/trivy-cache

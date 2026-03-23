@@ -1,0 +1,44 @@
+# k8s/manifests/namespace.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: streamforge-dev
+  labels:
+    name: streamforge-dev
+    environment: dev
+    project: streamforge
+    managed-by: terraform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: streamforge-staging
+  labels:
+    name: streamforge-staging
+    environment: staging
+    project: streamforge
+    managed-by: terraform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: streamforge-prod
+  labels:
+    name: streamforge-prod
+    environment: production
+    project: streamforge
+    managed-by: terraform
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: streamforge-monitoring
+  labels:
+    name: streamforge-monitoring
+    project: streamforge
+    managed-by: terraform
+    

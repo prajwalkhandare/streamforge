@@ -1,0 +1,18 @@
+# k8s/helm/streamforge/values-dev.yaml
+
+global:
+  environment: dev
+
+backend:
+  replicaCount: 2
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+
+frontend:
+  replicaCount: 1
+
+ingress:
+  enabled: false  # Use port-forward for dev
+  

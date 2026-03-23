@@ -1,0 +1,76 @@
+{
+  "dashboard": {
+    "title": "Database Metrics",
+    "description": "PostgreSQL RDS Metrics",
+    "tags": ["database", "postgresql", "rds"],
+    "timezone": "browser",
+    "editable": true,
+    "refresh": "30s",
+    "panels": [
+      {
+        "title": "Database Connections",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "pg_stat_database_numbackends",
+            "legendFormat": "Active Connections"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Connections"},
+          {"format": "short"}
+        ],
+        "title": "Database Connections"
+      },
+      {
+        "title": "Query Throughput",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(pg_stat_database_xact_commit[5m]) + rate(pg_stat_database_xact_rollback[5m])",
+            "legendFormat": "Queries/sec"
+          }
+        ],
+        "yaxes": [
+          {"format": "qps", "label": "Queries/sec"},
+          {"format": "short"}
+        ],
+        "title": "Query Throughput"
+      },
+      {
+        "title": "CPU Utilization",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "aws_rds_cpuutilization_average",
+            "legendFormat": "CPU %"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "CPU %"},
+          {"format": "short"}
+        ],
+        "title": "RDS CPU Utilization"
+      },
+      {
+        "title": "Free Storage Space",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "aws_rds_free_storage_space_average",
+            "legendFormat": "Free Space"
+          }
+        ],
+        "yaxes": [
+          {"format": "bytes", "label": "Free Space"},
+          {"format": "short"}
+        ],
+        "title": "Free Storage Space"
+      }
+    ]
+  }
+}

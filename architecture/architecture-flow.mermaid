@@ -1,0 +1,68 @@
+graph TB
+    subgraph "🌐 Users"
+        User["User Browser/App"]
+    end
+    
+    subgraph "☁️ AWS Cloud - Mumbai Region"
+        subgraph "CDN Layer"
+            CF[("CloudFront CDN")]
+            S3_Static[("S3 Static Website")]
+        end
+        
+        subgraph "Load Balancing"
+            ALB[("Application Load Balancer + WAF")]
+        end
+        
+        subgraph "Kubernetes Cluster - EKS"
+            direction TB
+            subgraph "Node Group 1"
+                Pod1["Backend Pod 1"]
+                Pod2["Frontend Pod 1"]
+            end
+            subgraph "Node Group 2"
+                Pod3["Backend Pod 2"]
+                Pod4["Frontend Pod 2"]
+            end
+            subgraph "Node Group 3"
+                Pod5["Backend Pod 3"]
+                Pod6["Frontend Pod 3"]
+            end
+            HPA["Horizontal Pod Autoscaler"]
+        end
+        
+        subgraph "Data Layer"
+            RDS[("RDS PostgreSQL Multi-AZ")]
+            Redis[("ElastiCache Redis")]
+            S3_Videos[("S3 Video Storage")]
+        end
+        
+        subgraph "Monitoring"
+            Prom["Prometheus"]
+            Graf["Grafana"]
+            ELK["ELK Stack"]
+        end
+        
+        subgraph "CI/CD"
+            Jenkins["Jenkins"]
+            ArgoCD["ArgoCD"]
+            ECR["Amazon ECR"]
+        end
+    end
+    
+    User --> CF
+    CF --> S3_Static
+    CF --> ALB
+    ALB --> Pod1 & Pod3 & Pod5
+    Pod1 & Pod3 & Pod5 --> RDS
+    Pod1 & Pod3 & Pod5 --> Redis
+    Pod1 & Pod3 & Pod5 --> S3_Videos
+    
+    HPA -.-> Pod1 & Pod3 & Pod5
+    
+    Pod1 & Pod3 & Pod5 --> Prom
+    Prom --> Graf
+    Pod1 & Pod3 & Pod5 --> ELK
+    
+    Jenkins --> ECR
+    ECR --> ArgoCD
+    ArgoCD --> Pod1 & Pod3 & Pod5
