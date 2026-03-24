@@ -1,212 +1,326 @@
-# STREAMFORGE - COMPLETE DOCUMENTATION
+<div align="center">
 
-================================================================================
-                               SETUP GUIDE
-================================================================================
+# 🎬 StreamForge
 
-## Prerequisites
+### A production-grade video streaming platform built on AWS & Kubernetes
 
-### Required Tools
-- **AWS CLI** (v2.x) - [Install Guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-- **Terraform** (v1.6+) - [Install Guide](https://developer.hashicorp.com/terraform/downloads)
-- **kubectl** (v1.28+) - [Install Guide](https://kubernetes.io/docs/tasks/tools/)
-- **Helm** (v3.x) - [Install Guide](https://helm.sh/docs/intro/install/)
-- **Docker** (v24.x) - [Install Guide](https://docs.docker.com/engine/install/)
-- **Node.js** (v20+) - [Install Guide](https://nodejs.org/)
-- **PostgreSQL** (v15+) - For local development
+[![AWS](https://img.shields.io/badge/AWS-EKS%20%7C%20RDS%20%7C%20S3%20%7C%20CloudFront-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white)](https://aws.amazon.com)
+[![Terraform](https://img.shields.io/badge/Terraform-v1.6+-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)](https://www.terraform.io/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.28+-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+[![Node.js](https://img.shields.io/badge/Node.js-v20+-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-v15+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
-### AWS Account Setup
-1. Create AWS account at https://aws.amazon.com
-2. Create IAM user with Admin access
-3. Generate Access Key and Secret Key
-4. Configure AWS CLI:
+<br/>
 
+> Deploy a scalable, cloud-native video streaming platform with full observability — in under 15 minutes.
+
+<br/>
+
+[🚀 Quick Start](#-quick-start) • [☁️ Infrastructure](#️-infrastructure) • [🛠️ Local Dev](#️-local-development) • [📊 Monitoring](#-monitoring) • [🔧 Troubleshooting](#-troubleshooting)
+
+</div>
+
+---
+
+## ✨ Features
+
+- 🎥 **Video streaming** with CDN-accelerated delivery via CloudFront
+- ☁️ **Auto-scaling** EKS cluster with Kubernetes node group management
+- 🗄️ **Multi-AZ PostgreSQL** RDS for high availability
+- ⚡ **Redis caching** with ElastiCache for blazing-fast responses
+- 📦 **S3 storage** for videos and static assets
+- 📊 **Full observability** with Prometheus + Grafana dashboards
+- 🔒 **IAM roles & policies** — security baked in by default
+- 🌐 **Application Load Balancer** with ingress routing
+
+---
+
+## 🏗️ Architecture
+
+```
+                          ┌──────────────┐
+                          │  CloudFront  │  CDN
+                          └──────┬───────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │  Application Load       │
+                    │     Balancer (ALB)      │
+                    └────────────┬────────────┘
+                                 │
+              ┌──────────────────▼──────────────────┐
+              │           EKS Cluster               │
+              │  ┌─────────────┐  ┌─────────────┐  │
+              │  │  Frontend   │  │   Backend   │  │
+              │  │  (React)    │  │  (Node.js)  │  │
+              │  └─────────────┘  └──────┬──────┘  │
+              └─────────────────────────┼───────────┘
+                                        │
+              ┌─────────────────────────┼──────────────────┐
+              │                         │                  │
+     ┌────────▼───────┐    ┌────────────▼──────┐   ┌──────▼──────┐
+     │  RDS PostgreSQL │    │ ElastiCache Redis │   │  S3 Buckets │
+     │   (Multi-AZ)   │    │                   │   │             │
+     └────────────────┘    └───────────────────┘   └─────────────┘
+```
+
+---
+
+## 📋 Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+| Tool | Version | Install |
+|------|---------|---------|
+| **AWS CLI** | v2.x | [Guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+| **Terraform** | v1.6+ | [Guide](https://developer.hashicorp.com/terraform/downloads) |
+| **kubectl** | v1.28+ | [Guide](https://kubernetes.io/docs/tasks/tools/) |
+| **Helm** | v3.x | [Guide](https://helm.sh/docs/intro/install/) |
+| **Docker** | v24.x | [Guide](https://docs.docker.com/engine/install/) |
+| **Node.js** | v20+ | [Guide](https://nodejs.org/) |
+| **PostgreSQL** | v15+ | Local dev only |
+
+---
+
+## 🚀 Quick Start
+
+### 1️⃣ Configure AWS
+
+```bash
 aws configure
-# AWS Access Key ID: YOUR_KEY
+# AWS Access Key ID:     YOUR_KEY
 # AWS Secret Access Key: YOUR_SECRET
-# Default region: ap-south-1
+# Default region:        ap-south-1
 # Default output format: json
-Step 1: Clone Repository
+```
 
+### 2️⃣ Clone & Deploy Infrastructure
+
+```bash
 git clone https://github.com/prajwalkhandare/streamforge.git
-cd streamforge
-Step 2: Deploy Infrastructure (Terraform)
+cd streamforge/terraform/environments/dev
 
-cd terraform/environments/dev
-
-# Initialize Terraform
 terraform init
-
-# Review plan
 terraform plan
-
-# Apply infrastructure
 terraform apply -auto-approve
+```
 
-# Wait for infrastructure creation (~10-15 minutes)
-This creates:
+> ⏱️ Infrastructure creation takes **~10–15 minutes**. This provisions:
+> VPC · EKS Cluster · RDS PostgreSQL (Multi-AZ) · S3 Buckets · CloudFront CDN · ElastiCache Redis · ALB · IAM Roles
 
-VPC with public/private subnets
+### 3️⃣ Connect kubectl to EKS
 
-EKS Cluster with node groups
-
-RDS PostgreSQL (Multi-AZ)
-
-S3 buckets for videos and static files
-
-CloudFront CDN distribution
-
-ElastiCache Redis cluster
-
-Application Load Balancer
-
-IAM roles and policies
-
-Step 3: Configure kubectl for EKS
-bash
-# Update kubeconfig
+```bash
 aws eks update-kubeconfig --region ap-south-1 --name streamforge-dev-cluster
+kubectl get nodes   # Should show 3 nodes
+```
 
-# Verify connection
-kubectl get nodes
-# Should show 3 nodes
-Step 4: Deploy Monitoring Stack
+### 4️⃣ Deploy Monitoring Stack
 
-# Create monitoring namespace
+```bash
 kubectl create namespace monitoring
 
-# Deploy Prometheus
+# Prometheus
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm install prometheus prometheus-community/prometheus -n monitoring
 
-# Deploy Grafana
+# Grafana
 helm repo add grafana https://grafana.github.io/helm-charts
 helm install grafana grafana/grafana -n monitoring
 
 # Get Grafana admin password
-kubectl get secret -n monitoring grafana -o jsonpath="{.data.admin-password}" | base64 --decode
-Step 5: Deploy Application
+kubectl get secret -n monitoring grafana \
+  -o jsonpath="{.data.admin-password}" | base64 --decode
+```
 
-# Create namespace
+### 5️⃣ Deploy Application
+
+```bash
 kubectl create namespace streamforge
 
-# Deploy with Helm
 cd k8s/helm/streamforge
 helm install streamforge . \
   --namespace streamforge \
   --create-namespace \
   --values values.yaml
 
-# Check deployment status
 kubectl get pods -n streamforge
-kubectl get svc -n streamforge
-Step 6: Run Backend Locally (Development)
+kubectl get svc  -n streamforge
+```
 
+---
+
+## 🛠️ Local Development
+
+### Backend
+
+```bash
 cd backend
-
-# Install dependencies
 npm install
-
-# Copy environment variables
-cp .env.example .env
-
-# Edit .env with your database credentials
-# DB_HOST=localhost
-# DB_PORT=5432
-# DB_NAME=streamforge
-# DB_USER=postgres
-# DB_PASSWORD=yourpassword
-
-# Run database migrations
+cp .env.example .env   # Fill in your DB credentials
 npm run db:migrate
+npm run dev            # http://localhost:5000
+```
 
-# Start development server
-npm run dev
-# Server running at http://localhost:5000
-Step 7: Run Frontend Locally (Development)
+<details>
+<summary>📄 Example <code>.env</code> configuration</summary>
 
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=streamforge
+DB_USER=postgres
+DB_PASSWORD=yourpassword
+```
+</details>
+
+### Frontend
+
+```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Copy environment variables
 cp .env.example .env
+npm start              # http://localhost:3000
+```
 
-# Start development server
-npm start
-# Frontend running at http://localhost:3000
-Step 8: Access the Application
-Service	URL
-Frontend	http://localhost:3000
-Backend API	http://localhost:5000
-API Health Check	http://localhost:5000/health
-Grafana	http://localhost:3001 (admin/admin)
-Prometheus	http://localhost:9090
-Step 9: Verify Deployment
+---
 
-# Check all pods are running
+## 📊 Monitoring
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| 🌐 Frontend | http://localhost:3000 | — |
+| ⚙️ Backend API | http://localhost:5000 | — |
+| 💚 Health Check | http://localhost:5000/health | — |
+| 📈 Grafana | http://localhost:3001 | `admin / admin` |
+| 🔥 Prometheus | http://localhost:9090 | — |
+
+---
+
+## ✅ Verify Your Deployment
+
+```bash
+# All pods running?
 kubectl get pods -n streamforge
 
-# Check services
+# Services healthy?
 kubectl get svc -n streamforge
 
-# Check ingress
+# Ingress configured?
 kubectl get ingress -n streamforge
 
 # Get ALB endpoint
-kubectl get svc -n streamforge streamforge-backend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-Setup Troubleshooting
-Terraform Apply Fails
-Error: Error: Error creating EKS cluster: AccessDeniedException
+kubectl get svc -n streamforge streamforge-backend \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```
 
-Solution:
+---
 
+## 🔧 Troubleshooting
 
-# Verify AWS credentials
+<details>
+<summary><strong>🔴 Terraform Apply Fails — AccessDeniedException</strong></summary>
+
+```bash
+# Verify your AWS credentials
 aws sts get-caller-identity
 
-# Ensure IAM role has correct permissions
-# Check if role exists
+# Check if EKS cluster role exists
 aws iam get-role --role-name eks-cluster-role
-Error: Error: timeout while waiting for state to become 'success'
+```
 
-Solution:
+Ensure your IAM user has the correct permissions attached.
 
+</details>
 
-# Increase timeout
+<details>
+<summary><strong>🔴 Terraform Timeout</strong></summary>
+
+```bash
 terraform apply -auto-approve -timeout=30m
 
-# Check CloudFormation events
-aws cloudformation describe-stack-events --stack-name eksctl-streamforge-cluster
-EKS Cluster Not Responding
-Symptom: kubectl get nodes returns connection refused
+# Debug via CloudFormation
+aws cloudformation describe-stack-events \
+  --stack-name eksctl-streamforge-cluster
+```
 
-Solution:
+</details>
 
+<details>
+<summary><strong>🔴 kubectl — Connection Refused</strong></summary>
 
-# Update kubeconfig
+```bash
+# Refresh kubeconfig
 aws eks update-kubeconfig --region ap-south-1 --name streamforge-dev-cluster
 
 # Check cluster status
 aws eks describe-cluster --name streamforge-dev-cluster --query cluster.status
 
-# Test API server connectivity
+# Test connectivity
 kubectl cluster-info
-Node Group Not Scaling
-Symptom: New pods stuck in pending
+```
 
-Solution:
+</details>
 
+<details>
+<summary><strong>🔴 Pods Stuck in Pending — Node Group Not Scaling</strong></summary>
 
+```bash
 # Check node group status
-aws eks describe-nodegroup --cluster-name streamforge-dev-cluster --nodegroup-name main
+aws eks describe-nodegroup \
+  --cluster-name streamforge-dev-cluster \
+  --nodegroup-name main
 
-# Check cluster autoscaler logs
+# Check autoscaler logs
 kubectl logs -n kube-system deployment/cluster-autoscaler
 
-# Manually scale node group
+# Manually scale if needed
 aws eks update-nodegroup-config \
   --cluster-name streamforge-dev-cluster \
   --nodegroup-name main \
   --scaling-config desiredSize=3,minSize=1,maxSize=10
+```
+
+</details>
+
+---
+
+## 📁 Project Structure
+
+```
+streamforge/
+├── terraform/
+│   └── environments/
+│       └── dev/          # Terraform IaC for AWS
+├── k8s/
+│   └── helm/
+│       └── streamforge/  # Helm chart for K8s deployment
+├── backend/              # Node.js API server
+│   ├── .env.example
+│   └── src/
+├── frontend/             # React frontend
+│   ├── .env.example
+│   └── src/
+└── README.md
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+1. Fork the repository
+2. Create your feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -m 'Add amazing feature'`
+4. Push to the branch: `git push origin feature/amazing-feature`
+5. Open a Pull Request
+
+---
+
+<div align="center">
+
+Made with ❤️ by [Prajwal Khandare](https://github.com/prajwalkhandare)
+
+⭐ Star this repo if you found it useful!
+
+</div>
